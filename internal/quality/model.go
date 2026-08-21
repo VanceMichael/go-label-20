@@ -1,6 +1,7 @@
 package quality
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -66,6 +67,41 @@ type ChainEntry struct {
 	SealBefore    string
 	SealAfter     string
 	TransferredAt time.Time
+}
+
+type MeasurementCursor interface {
+	Next() bool
+	Measurement() Measurement
+	Err() error
+	Close() error
+}
+
+type MeasurementSource interface {
+	OpenMeasurements(context.Context, string) (MeasurementCursor, error)
+}
+
+func CollectMeasurements(ctx context.Context, source MeasurementSource, sampleIDs []string) ([]Measurement, error) {
+	if source == nil || len(sampleIDs) == 0 {
+		return nil, fmt.Errorf("%w: measurement collection request", domain.ErrInvalid)
+	}
+	collected := make([]Measurement, 0)
+	for _, sampleID := range sampleIDs {
+		if sampleID == "" {
+			return nil, fmt.Errorf("%w: sample ID", domain.ErrInvalid)
+		}
+		cursor, err := source.OpenMeasurements(ctx, sampleID)
+		if err != nil {
+			return nil, fmt.Errorf("open measurements for %s: %w", sampleID, err)
+		}
+		defer cursor.Close()
+		for cursor.Next() {
+			collected = append(collected, cursor.Measurement())
+		}
+		if err := cursor.Err(); err != nil {
+			return nil, fmt.Errorf("read measurements for %s: %w", sampleID, err)
+		}
+	}
+	return collected, nil
 }
 
 func (sample Sample) Validate(now time.Time) error {
